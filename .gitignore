@@ -1,0 +1,54 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+.env
+.venv
+venv/
+ENV/
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+.ruff_cache/
+*.db
+*.sqlite3
+htmlcov/
+.coverage
+coverage.xml
+
+# Node.js
+node_modules/
+.next/
+out/
+.turbo/
+*.tsbuildinfo
+next-env.d.ts
+
+# Uploads (user data, not committed)
+backend/uploads/
+uploads/
+
+# Environment files
+.env
+.env.local
+.env.*.local
+!.env.example
+
+# IDEs
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# Docker
+*.log
+
+# Distribution
+*.tar.gz
+*.zip
