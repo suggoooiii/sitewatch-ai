@@ -13,7 +13,9 @@ from app.models.database import Analysis, Detection
 from app.models.schemas import AnalysisResult, AnalysisSummary, BoundingBox, DetectionResponse
 from app.services.detection import run_object_detection
 from app.services.image_storage import save_image
+from app.services.ppe_detection import run_ppe_detection
 from app.services.zero_shot import deduplicate_detections, run_zero_shot_detection
+from app.utils.label_filter import postprocess_detections
 from app.utils.severity import calculate_safety_score, is_hazard
 
 logger = logging.getLogger(__name__)
@@ -54,16 +56,21 @@ async def detect(
     # Save image to disk
     image_url = await save_image(image_bytes, file.filename or "upload.jpg")
 
-    # Run both detection pipelines concurrently (graceful fallback on error)
+    # Run all three detection pipelines concurrently (graceful fallback on error)
     import asyncio
 
-    object_results, zero_shot_results = await asyncio.gather(
+    object_results, zero_shot_results, ppe_results = await asyncio.gather(
         run_object_detection(image_bytes),
         run_zero_shot_detection(image_bytes),
+        run_ppe_detection(image_bytes),
     )
 
-    # Combine and deduplicate detections
+    # Combine and deduplicate DETR detections, then merge PPE results with priority
     all_detections = deduplicate_detections(object_results, zero_shot_results)
+    all_detections = deduplicate_detections(all_detections, ppe_results)
+
+    # Remap COCO misclassifications & filter irrelevant labels
+    all_detections = postprocess_detections(all_detections)
 
     # Calculate summary stats
     hazards = [d for d in all_detections if is_hazard(d["label"])]

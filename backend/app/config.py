@@ -14,6 +14,9 @@ class Settings(BaseSettings):
 
     # Hugging Face
     huggingface_api_token: str = ""
+    primary_model: str = "facebook/detr-resnet-50"
+    secondary_model: str = "facebook/detr-resnet-101"
+    ppe_model: str = "ikigaiii/yolos-tiny-ppe-detection"
 
     # Database
     database_url: str = "sqlite+aiosqlite:///./sitewatch.db"

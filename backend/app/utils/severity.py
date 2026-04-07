@@ -3,6 +3,7 @@
 # Labels that map to each severity level
 SEVERITY_LABELS: dict[str, set[str]] = {
     "critical": {
+        "head",
         "person without helmet",
         "person in restricted zone",
         "no helmet",

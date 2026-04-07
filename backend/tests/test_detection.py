@@ -16,6 +16,7 @@ from app.utils.severity import calculate_safety_score, classify_severity, is_haz
 
 def test_classify_severity_critical():
     assert classify_severity("person without helmet") == "critical"
+    assert classify_severity("head") == "critical"
 
 
 def test_classify_severity_high():
@@ -147,7 +148,7 @@ async def test_detect_endpoint_calculates_hazard_score(async_client: AsyncClient
             "confidence": 0.85,
             "bbox": {"x": 10.0, "y": 20.0, "width": 50.0, "height": 100.0},
             "severity": "critical",
-            "source": "zero-shot",
+            "source": "object-detection-resnet101",
         }
     ]
 

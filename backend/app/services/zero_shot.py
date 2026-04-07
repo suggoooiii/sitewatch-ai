@@ -1,41 +1,32 @@
-"""Zero-shot object detection service using Hugging Face Inference API.
+"""Secondary object detection service using Hugging Face Inference API.
 
-Uses google/owlvit-base-patch32 for construction safety-specific detection.
+Uses facebook/detr-resnet-101 as a second, higher-capacity object detection
+model to complement the primary DETR-resnet-50 pipeline. Both models run
+concurrently; their results are merged via IoU-based deduplication.
+
+Note: The original design used OWL-ViT / OWLv2 for zero-shot PPE detection,
+but those models are not available on HF's free serverless inference tier.
+DETR-101 provides more robust general detection as a practical alternative.
 """
 
 import logging
 
-from huggingface_hub import InferenceClient
+import httpx
 
 from app.config import settings
 from app.utils.severity import classify_severity
 
 logger = logging.getLogger(__name__)
 
-ZERO_SHOT_MODEL = "google/owlvit-base-patch32"
-
-CONSTRUCTION_SAFETY_LABELS = [
-    "person without helmet",
-    "person with helmet",
-    "safety vest",
-    "no safety vest",
-    "scaffolding",
-    "crane",
-    "excavator",
-    "hard hat",
-    "person",
-    "vehicle",
-]
-
-
-def _get_client() -> InferenceClient:
-    """Return an InferenceClient configured with the HF token."""
-    return InferenceClient(token=settings.huggingface_api_token)
+HF_API_URL = "https://router.huggingface.co/hf-inference/models"
 
 
 async def run_zero_shot_detection(image_bytes: bytes) -> list[dict]:
     """
-    Run zero-shot object detection using google/owlvit-base-patch32.
+    Run secondary object detection using facebook/detr-resnet-101.
+
+    Keeps the same function signature for backward compatibility with the
+    detection route which calls both pipelines via asyncio.gather.
 
     Args:
         image_bytes: Raw image bytes.
@@ -44,46 +35,58 @@ async def run_zero_shot_detection(image_bytes: bytes) -> list[dict]:
         List of detection dicts with label, confidence, bbox, severity, source.
         Returns an empty list on error (graceful fallback).
     """
-    try:
-        client = _get_client()
+    def _mime_type(data: bytes) -> str:
+        if data[:4] == b'\x89PNG':
+            return "image/png"
+        if data[:3] == b'\xff\xd8\xff':
+            return "image/jpeg"
+        if data[:4] in (b'GIF8', b'GIF9'):
+            return "image/gif"
+        return "image/jpeg"
 
-        results = client.zero_shot_object_detection(
-            image=image_bytes,
-            candidate_labels=CONSTRUCTION_SAFETY_LABELS,
-            model=ZERO_SHOT_MODEL,
-        )
+    try:
+        headers = {
+            "Authorization": f"Bearer {settings.huggingface_api_token}",
+            "Content-Type": _mime_type(image_bytes),
+        }
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            response = await client.post(
+                f"{HF_API_URL}/{settings.secondary_model}",
+                content=image_bytes,
+                headers=headers,
+            )
+            if response.status_code != 200:
+                logger.error(
+                    "Secondary detection API error %s: %s",
+                    response.status_code,
+                    response.text[:500],
+                )
+                return []
+            results = response.json()
 
         detections = []
         for item in results:
-            label = item.label if hasattr(item, "label") else item.get("label", "unknown")
-            score = item.score if hasattr(item, "score") else item.get("score", 0.0)
-            box = item.box if hasattr(item, "box") else item.get("box", {})
-
-            if hasattr(box, "xmin"):
-                x = box.xmin
-                y = box.ymin
-                w = box.xmax - box.xmin
-                h = box.ymax - box.ymin
-            else:
-                x = box.get("xmin", 0)
-                y = box.get("ymin", 0)
-                w = box.get("xmax", 0) - x
-                h = box.get("ymax", 0) - y
-
+            label = item.get("label", "unknown")
+            score = item.get("score", 0.0)
+            box = item.get("box", {})
+            x = box.get("xmin", 0)
+            y = box.get("ymin", 0)
+            w = box.get("xmax", 0) - x
+            h = box.get("ymax", 0) - y
             severity = classify_severity(label)
             detections.append({
                 "label": label,
                 "confidence": float(score),
                 "bbox": {"x": float(x), "y": float(y), "width": float(w), "height": float(h)},
                 "severity": severity,
-                "source": "zero-shot",
+                "source": "object-detection-resnet101",
             })
 
-        logger.info("Zero-shot detection returned %d results", len(detections))
+        logger.info("Secondary detection (DETR-101) returned %d results", len(detections))
         return detections
 
     except Exception as exc:
-        logger.warning("Zero-shot detection failed (graceful fallback): %s", exc)
+        logger.warning("Secondary detection failed (graceful fallback): %s", exc)
         return []
 
 

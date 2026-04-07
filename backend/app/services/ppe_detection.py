@@ -1,6 +1,9 @@
-"""Object detection service using Hugging Face Inference API.
+"""PPE detection service using the fine-tuned YOLOS-Tiny model.
 
-Uses the facebook/detr-resnet-50 model for general object detection.
+Uses ikigaiii/yolos-tiny-ppe-detection — a YOLOS-Tiny model fine-tuned on
+5 000 construction-site images to detect helmets, exposed heads, and persons.
+
+Labels: head (critical), helmet (safe), person (low).
 """
 
 import logging
@@ -15,9 +18,9 @@ logger = logging.getLogger(__name__)
 HF_API_URL = "https://router.huggingface.co/hf-inference/models"
 
 
-async def run_object_detection(image_bytes: bytes) -> list[dict]:
+async def run_ppe_detection(image_bytes: bytes) -> list[dict]:
     """
-    Run object detection using facebook/detr-resnet-50 via HF Inference API.
+    Run PPE detection using the fine-tuned YOLOS-Tiny model via HF Inference API.
 
     Args:
         image_bytes: Raw image bytes.
@@ -42,11 +45,17 @@ async def run_object_detection(image_bytes: bytes) -> list[dict]:
         }
         async with httpx.AsyncClient(timeout=30.0) as client:
             response = await client.post(
-                f"{HF_API_URL}/{settings.primary_model}",
+                f"{HF_API_URL}/{settings.ppe_model}",
                 content=image_bytes,
                 headers=headers,
             )
-            response.raise_for_status()
+            if response.status_code != 200:
+                logger.error(
+                    "PPE detection API error %s: %s",
+                    response.status_code,
+                    response.text[:500],
+                )
+                return []
             results = response.json()
 
         detections = []
@@ -64,12 +73,12 @@ async def run_object_detection(image_bytes: bytes) -> list[dict]:
                 "confidence": float(score),
                 "bbox": {"x": float(x), "y": float(y), "width": float(w), "height": float(h)},
                 "severity": severity,
-                "source": "object-detection",
+                "source": "ppe-detection-yolos",
             })
 
-        logger.info("Object detection returned %d results", len(detections))
+        logger.info("PPE detection (YOLOS-Tiny) returned %d results", len(detections))
         return detections
 
     except Exception as exc:
-        logger.warning("Object detection failed (graceful fallback): %s", exc)
+        logger.warning("PPE detection failed (graceful fallback): %s", exc)
         return []
